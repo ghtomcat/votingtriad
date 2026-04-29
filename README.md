@@ -1,259 +1,242 @@
-# Hovercraft Voting Triad — Firmware v1.0
+# VotingTriad — Airbus-Style Voting Flight Computer
 
-Airbus-Style Envelope Protection für Timos Hovercraft.  
-Drei unabhängige Nodes stimmen via CAN Bus über den Systemzustand ab.
+A 3-node fault-tolerant flight computer for RC aircraft and hovercraft, built on the LilyGo T-CAN485 (ESP32). Inspired by Airbus envelope protection: three independent nodes continuously vote on vehicle state via CAN bus. The majority rules. Any node can become master.
 
----
-
-## Systemübersicht
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    CAN Bus (500 kbps)                   │
-│                                                         │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐          │
-│  │  Node 1  │◄──►│  Node 2  │◄──►│  Node 3  │          │
-│  │  MASTER  │    │  VOTER   │    │  VOTER   │          │
-│  │          │    │          │    │          │          │
-│  │ BNO055   │    │ BNO055   │    │ BNO055   │          │
-│  │ RC Input │    │          │    │          │          │
-│  │ Servo    │    │          │    │          │          │
-│  │ SD Log   │    │          │    │          │          │
-│  │ WiFi     │    │          │    │          │          │
-│  └──────────┘    └──────────┘    └──────────┘          │
-└─────────────────────────────────────────────────────────┘
-```
-
-**Voting-Logik:**
-- 3/3 Nodes einig → **NORMAL LAW** (volle Schutzfunktionen)
-- 2/3 Nodes einig → **DEGRADED** (reduzierte Limits)
-- 1/3 Nodes einig → **DIRECT LAW** (nur Direktsteuerung)
-- 0/3 → **DISARM** (alle Outputs gesperrt)
+Includes full **Hardware-In-the-Loop (HIL)** integration with the [OpenSim](../OpenSim) browser-based flight simulator — fly a simulated Corsair with real RC sticks and real flight computer logic.
 
 ---
 
-## Hardware: LilyGo T-CAN485
+## Architecture
 
-### Pin-Belegung (alle drei Nodes identisch)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      CAN Bus (500 kbps)                         │
+│                   + RS485 fallback (115200)                     │
+│                                                                 │
+│  ┌────────────┐       ┌────────────┐       ┌────────────┐       │
+│  │   Node 1   │◄─────►│   Node 2   │◄─────►│   Node 3   │       │
+│  │   MASTER   │       │   VOTER    │       │   VOTER    │       │
+│  │            │       │            │       │            │       │
+│  │ BNO055 IMU │       │ BNO055 IMU │       │ BNO055 IMU │       │
+│  │ BMP390 Bar │       │ BMP390 Bar │       │ BMP390 Bar │       │
+│  │ CRSF RC    │       │            │       │            │       │
+│  │ PCA9685    │       │            │       │            │       │
+│  │ SD Logger  │       │            │       │            │       │
+│  │ Telemetry  │       │            │       │            │       │
+│  └────────────┘       └────────────┘       └────────────┘       │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-| Funktion        | GPIO | Hinweis                        |
-|-----------------|------|--------------------------------|
-| CAN RX          | 26   | Zu CAN-Transceiver RXD         |
-| CAN TX          | 27   | Zu CAN-Transceiver TXD         |
-| CAN Silent      | 23   | LOW = aktiv, HIGH = stumm       |
-| I2C SDA (BNO055)| 32   | 4.7kΩ Pull-Up zu 3.3V          |
-| I2C SCL (BNO055)| 33   | 4.7kΩ Pull-Up zu 3.3V          |
-| WS2812 LED      |  4   | 470Ω Serienwiderstand empfohlen |
-| SD MOSI         | 15   | SPI                            |
-| SD MISO         |  2   | SPI                            |
-| SD SCLK         | 14   | SPI                            |
-| SD CS           | 13   | SPI                            |
+### Voting Logic
 
-### Zusätzlich nur auf Node 1 (Master)
+Each node broadcasts its IMU data every 20ms. The master collects all three and votes:
 
-| Funktion        | GPIO | Hinweis                        |
-|-----------------|------|--------------------------------|
-| RC CH1 Rudder   | 34   | Input-Only, kein Pull-Up!      |
-| RC CH2 Thrust   | 35   | Input-Only, kein Pull-Up!      |
-| RC CH3 Lift     | 36   | Input-Only (VP Pin)            |
-| RC CH4 Mode     | 39   | Input-Only (VN Pin)            |
-| Rudder Servo    | 25   | PWM 50Hz                       |
-| Thrust ESC      | 18   | PWM 50Hz                       |
-| Lift ESC        | 19   | PWM 50Hz                       |
+| Agreement | Envelope Mode | Description                        |
+|-----------|---------------|------------------------------------|
+| 3/3 nodes | NORMAL LAW    | Full envelope protection active    |
+| 2/3 nodes | DEGRADED      | Reduced limits, warning LED        |
+| 1/3 nodes | DIRECT LAW    | Pass-through only, no protection   |
+| 0/3 nodes | DISARM        | All outputs locked                 |
 
-> **⚠️ Wichtig:** GPIO32/33 werden für I2C (BNO055) verwendet.  
-> Die Servo-Ausgänge nutzen daher GPIO18/19 statt der ursprünglich  
-> vorgesehenen GPIO32/33. Bitte entsprechend verdrahten!
+Any node can be promoted to master if the current master goes silent for >500ms.
 
 ---
 
-## BNO055 Verdrahtung (DFRobot SEN0374)
+## Hardware
 
-```
-BNO055       LilyGo T-CAN485
-─────────────────────────────
-VCC    ──►  3.3V
-GND    ──►  GND
-SDA    ──►  GPIO32  (mit 4.7kΩ Pull-Up zu 3.3V)
-SCL    ──►  GPIO33  (mit 4.7kΩ Pull-Up zu 3.3V)
-ADR    ──►  GND     (I2C-Adresse 0x28)
-```
+### LilyGo T-CAN485
 
----
+ESP32-based board with onboard CAN transceiver and RS485 transceiver. All three nodes use identical hardware.
 
-## CAN Bus Verdrahtung
+**Exposed GPIO header:** IO25, IO32, IO33, IO5, IO12, IO34, IO35, IO18  
+**Note:** IO34 and IO35 are input-only — cannot be used as UART TX or digital output.
 
-Alle drei Nodes werden parallel am CAN Bus angeschlossen:
+### Pin Assignment (all nodes)
 
-```
-Node 1 CAN H ──┬── Node 2 CAN H ──┬── Node 3 CAN H
-               │                  │
-Node 1 CAN L ──┴── Node 2 CAN L ──┴── Node 3 CAN L
-                                                   │
-                                          120Ω Abschlusswiderstand
-                                          (an beiden Enden des Bus!)
-```
+| Function          | GPIO | Notes                                  |
+|-------------------|------|----------------------------------------|
+| CAN RX            | 26   | Onboard transceiver                    |
+| CAN TX            | 27   | Onboard transceiver                    |
+| CAN Silent/Enable | 23   | LOW = active                           |
+| RS485 RX          | 21   | Onboard transceiver                    |
+| RS485 TX          | 22   | Onboard transceiver                    |
+| RS485 Enable      | 17   | HIGH = transmit, LOW = receive         |
+| I2C SDA           | 32   | BNO055 + BMP390 + PCA9685             |
+| I2C SCL           | 33   | BNO055 + BMP390 + PCA9685             |
+| WS2812 LED        | 4    | 470Ω series resistor recommended       |
+| SD MOSI           | 15   | SPI                                    |
+| SD MISO           | 2    | SPI                                    |
+| SD SCLK           | 14   | SPI                                    |
+| SD CS             | 13   | SPI                                    |
 
-**CAN Kabelempfehlung:** Twisted Pair, max. 20m bei 500 kbps.
+### Pin Assignment (Node 1 / Master only)
 
----
+| Function          | GPIO | Notes                                  |
+|-------------------|------|----------------------------------------|
+| CRSF RC RX        | 25   | Receiver TX → GPIO25 (Serial1)         |
+| CRSF RC TX        | 5    | ESP32 TX → Receiver RX (telemetry)     |
 
-## Software-Setup (PlatformIO)
+### I2C Devices (shared bus, GPIO32/33)
 
-### Voraussetzungen
-- PlatformIO IDE oder CLI
-- Python 3.x
-- USB-Treiber für ESP32 (CP210x oder CH340)
-
-### Installation
-
-```bash
-# Repository klonen
-git clone https://github.com/ghtomcat/hovercraft-triad
-cd hovercraft-triad
-
-# Abhängigkeiten werden automatisch installiert
-```
-
-### Flashen
-
-```bash
-# Node 1 (Master) flashen
-pio run -e node1 -t upload
-
-# Node 2 flashen
-pio run -e node2 -t upload
-
-# Node 3 flashen
-pio run -e node3 -t upload
-
-# Serial Monitor
-pio device monitor -b 115200
-```
+| Device  | Address | Function                     |
+|---------|---------|------------------------------|
+| BNO055  | 0x28    | IMU — heading, pitch, roll, yaw rate, accel |
+| BMP390  | 0x76    | Barometer — altitude, vertical speed |
+| PCA9685 | 0x40    | PWM servo/ESC driver (16 channels, 50Hz) |
 
 ---
 
-## WiFi Konfiguration
+## Sensor Wiring
 
-In `src/config.h` anpassen:
+### BNO055 IMU
+
+```
+BNO055          LilyGo T-CAN485
+────────────────────────────────
+VCC     ──►    3.3V
+GND     ──►    GND
+SDA     ──►    GPIO32
+SCL     ──►    GPIO33
+ADR     ──►    GND  (I2C address 0x28)
+```
+
+### BMP390 Barometer
+
+```
+BMP390          LilyGo T-CAN485
+────────────────────────────────
+VCC     ──►    3.3V
+GND     ──►    GND
+SDA     ──►    GPIO32
+SCL     ──►    GPIO33
+SDO     ──►    GND  (I2C address 0x76)
+```
+
+### PCA9685 Servo Driver
+
+```
+PCA9685         LilyGo T-CAN485
+────────────────────────────────
+VCC     ──►    3.3V  (logic)
+GND     ──►    GND
+SDA     ──►    GPIO32
+SCL     ──►    GPIO33
+V+      ──►    5–6V  (servo power, separate supply)
+OE      ──►    GND   (output enable, active LOW)
+A0–A5   ──►    GND   (address 0x40)
+```
+
+All servo/ESC signal wires connect to PCA9685 channels. The PCA9685 V+ rail must have its own power supply — do not power servos from the ESP32 3.3V pin.
+
+---
+
+## Vehicle Types
+
+The firmware supports two vehicle configurations, selected at compile time in `src/config.h`:
 
 ```cpp
-#define WIFI_SSID     "HovercraftAP"   // Name des Access Points
-#define WIFI_PASSWORD "hovercraft123"  // Passwort
-#define WIFI_AP_MODE  true             // true = eigener AP, false = Router
+#define VEHICLE_TYPE  VEHICLE_AIRPLANE   // or VEHICLE_HOVERCRAFT
 ```
 
-**Telemetrie-URL:** `ws://192.168.4.1:8080` (im AP-Modus)
+### Airplane (VEHICLE_AIRPLANE)
 
-### JSON-Format (alle 100ms):
-```json
-{
-  "heading": 270.5,
-  "pitch": 1.2,
-  "roll": 0.8,
-  "heading_error": -3.2,
-  "lift_throttle": 0.72,
-  "thrust_throttle": 0.45,
-  "yaw_rate": 2.1,
-  "envelope_mode": "NORMAL",
-  "nodes": [
-    {"id": 1, "health": "OK", "heading": 270.5},
-    {"id": 2, "health": "OK", "heading": 271.0},
-    {"id": 3, "health": "OK", "heading": 270.2}
-  ]
-}
-```
+| PCA9685 Channel | Function  | RC Channel | Control          |
+|-----------------|-----------|------------|------------------|
+| CH0             | Aileron   | CH1        | Roll (±1.0)      |
+| CH1             | Elevator  | CH2        | Pitch (±1.0)     |
+| CH2             | Rudder    | CH4        | Yaw (±1.0)       |
+| CH3             | Throttle  | CH3        | Thrust (0–1.0)   |
+
+Standard Mode 2 channel mapping. Aileron center = 1500µs, throttle min = 1000µs.
+
+### Hovercraft (VEHICLE_HOVERCRAFT)
+
+| PCA9685 Channel | Function | RC Channel | Control        |
+|-----------------|----------|------------|----------------|
+| CH0             | Rudder   | CH1        | Yaw (±1.0)     |
+| CH1             | Thrust   | CH2        | Thrust (0–1.0) |
+| CH2             | Lift     | CH3        | Lift (0–1.0)   |
 
 ---
 
-## RC-Steuerung
+## RC Input — ExpressLRS / CRSF
 
-| Kanal | Funktion      | 1000µs    | 1500µs  | 2000µs     |
-|-------|---------------|-----------|---------|------------|
-| CH1   | Rudder        | Voll links| Mitte   | Voll rechts|
-| CH2   | Thrust ESC    | AUS       | 50%     | Vollgas    |
-| CH3   | Lift ESC      | AUS       | 50%     | 80% max    |
-| CH4   | Mode Switch   | Manual    | Assisted| Autonomous |
+The firmware reads CRSF (Crossfire Serial Protocol) from an ExpressLRS receiver (tested with RadioMaster RP4 TD).
 
-### Betriebsmodi (CH4)
+**Protocol:** 420000 baud, 8N1, on Serial1 (GPIO25 RX / GPIO5 TX)  
+**Frame rate:** ~150Hz (16 channels, 11-bit resolution)  
+**Failsafe:** outputs disarm after 250ms without a valid frame
 
-- **MANUAL** (<1300µs): Direkte Steuerung, Envelope aktiv
-- **ASSISTED** (1300–1700µs): Heading Hold via PID
-  - Ohne Stick-Input: hält das Heading beim Modus-Eintritt
-  - Mit Stick-Input: direkte Steuerung, Heading wird aktualisiert
-- **AUTONOMOUS** (>1700µs): Zukünftig für GPS-Navigation
-
----
-
-## LED Status
-
-| Farbe        | Bedeutung                              |
-|--------------|----------------------------------------|
-| WEISS        | Boot / Initialisierung                 |
-| BLAU blinkt  | Suche CAN-Verbindung                   |
-| GRÜN         | NORMAL LAW — alle 3 Nodes OK           |
-| GELB         | DEGRADED — ein Node ausgefallen        |
-| ROT          | DIRECT LAW — zwei Nodes ausgefallen    |
-| BLAU         | AUTONOMOUS MODE aktiv                  |
-| MAGENTA blinkt | DISARM — kritischer Fehler           |
-
----
-
-## SD-Karten Logging
-
-CSV-Datei `/hoverlog.csv` auf der SD-Karte:
+### CRSF Wiring
 
 ```
-timestamp,heading_1,heading_2,heading_3,voted_heading,heading_error,
-lift_throttle,thrust_throttle,yaw_rate,envelope_mode,
-node1_health,node2_health,node3_health
+RP4 TD Receiver     LilyGo T-CAN485
+───────────────────────────────────
+TX          ──►    GPIO25  (CRSF data to ESP32)
+RX          ──►    GPIO5   (telemetry from ESP32)
+GND         ──►    GND
+5V          ──►    5V
 ```
 
-Flush alle 5 Sekunden. SD-Karte kann während Betrieb entnommen  
-werden — Datenverlust max. 5s.
+### RC Modes (CH6)
+
+| PWM Value  | Mode       | Behavior                                      |
+|------------|------------|-----------------------------------------------|
+| < 1300µs   | MANUAL     | Direct pass-through, envelope limits active   |
+| 1300–1700µs| ASSISTED   | Heading hold via PID (airplane: direct)       |
+| > 1700µs   | AUTONOMOUS | Reserved for future autopilot                 |
 
 ---
 
-## Node Failure & Promotion
+## CAN Bus
 
-**Node 1 fällt aus:**
-- Node 2 erkennt Timeout nach 500ms
-- Node 2 übernimmt Master-Rolle
-- LED auf Node 2 wechselt zu GELB
-- RC-Input und Servo-Ausgänge auf Node 2 aktiviert
+Primary inter-node communication. All three nodes are on a single bus.
 
-**Node 1 kommt zurück:**
-- Voting erkennt Node 1 als gesunden Node
-- Node 1 übernimmt automatisch wieder die Master-Rolle
-- System wechselt zurück zu NORMAL LAW
+```
+Node 1 ─── Node 2 ─── Node 3
+  CAN H ────────────────────── 120Ω
+  CAN L ────────────────────── 120Ω
+```
 
-> **Hinweis:** Bei Master-Promotion übernimmt Node 2 die Steuerung.  
-> RC-Empfänger und Servos müssen an **allen** Nodes angeschlossen sein,  
-> oder alternativ über einen RC-Bus-Multiplexer umgeschaltet werden.
+120Ω termination resistors at both ends of the bus. Use twisted pair cable, max ~20m at 500 kbps.
+
+Each node sends three CAN frames every 20ms:
+
+| CAN ID     | Contents                              |
+|------------|---------------------------------------|
+| 0x100+node | Heading, pitch, roll, health          |
+| 0x200+node | Heading error, yaw rate, accel X, time|
+| 0x300+node | Altitude, vertical speed              |
+
+### RS485 Fallback
+
+If CAN is silent for >200ms, the system automatically switches to RS485 (time-division multiplexed, one slot per node per 60ms cycle). CAN recovery is detected automatically and the fallback deactivates.
 
 ---
 
-## Envelope Protection Limits
+## Envelope Protection
 
-| Parameter        | Wert  | Einheit |
-|------------------|-------|---------|
-| Max Lift ESC     | 80%   | %       |
-| Max Thrust Accel | 0.8   | g       |
-| Max Yaw Rate     | 30    | °/s     |
-| Heading Toleranz | 5     | °       |
+### NORMAL LAW limits (hovercraft)
 
----
+| Parameter        | Limit | Unit  |
+|------------------|-------|-------|
+| Max lift ESC     | 80%   | —     |
+| Max thrust accel | 0.8   | g     |
+| Max yaw rate     | 30    | °/s   |
+| Heading tolerance| 5     | °     |
 
-## PID Heading Hold
+### Heading Hold PID (ASSISTED mode)
+
+Target heading is frozen at the moment ASSISTED mode is engaged. The PID corrects yaw to hold that heading.
 
 ```
-Kp = 0.80   — Proportional (Reaktionsschnelligkeit)
-Ki = 0.01   — Integral (eliminiert bleibende Abweichung)
-Kd = 0.05   — Differential (dämpft Überschwingen)
-Anti-Windup: Integral limitiert auf ±10
+Kp = 0.80   (proportional — response speed)
+Ki = 0.01   (integral — eliminates steady-state error)
+Kd = 0.05   (derivative — damps overshoot)
+Anti-windup: integral clamped to ±10
 ```
 
-Anpassung in `src/config.h`:
+Tune in `src/config.h`:
 ```cpp
 #define PID_KP  0.80f
 #define PID_KI  0.01f
@@ -262,48 +245,208 @@ Anpassung in `src/config.h`:
 
 ---
 
-## Dateistruktur
+## Hardware-In-the-Loop (HIL)
+
+HIL mode connects the ESP32 to the [OpenSim](../OpenSim) browser simulator over WiFi. The ESP32 reads simulated sensor state instead of real IMU/barometer data, and sends control outputs back to the sim instead of driving the PCA9685.
+
+```
+RC Transmitter
+      │ CRSF
+      ▼
+   ESP32 (HIL mode)
+      │ WebSocket (WiFi)
+      ▼
+   hub.js (Node.js relay)
+      │ WebSocket
+      ▼
+   OpenSim (browser)
+      │ physics simulation
+      ▼
+   Corsair F4U renders on screen
+```
+
+The full voting logic, envelope protection, and heading hold all run on real hardware against simulated sensor data. This is functionally equivalent to an iron-bird rig.
+
+### HIL Configuration
+
+In `src/config.h`:
+
+```cpp
+#define HIL_WIFI_SSID    "your-network"
+#define HIL_WIFI_PASS    "your-password"
+#define HIL_HUB_HOST     "192.168.1.x"   // machine running hub.js
+#define HIL_HUB_PORT     3000
+#define HIL_ROOM         "hil-corsair"
+```
+
+### HIL WebSocket Protocol
+
+**Sim → ESP32** (STATE_PATCH, 50Hz):
+```json
+{ "type": "STATE_PATCH", "room": "hil-corsair",
+  "patch": { "hdg": 270.5, "pitch": 1.2, "roll": 0.8,
+             "alt": 1500, "vs": 100, "spd": 180 } }
+```
+
+**ESP32 → Sim** (STATE_PATCH, on each control update):
+```json
+{ "type": "STATE_PATCH", "room": "hil-corsair",
+  "patch": { "rollT": 15.0, "pitchT": 5.0, "spdT": 180.0, "ap": false } }
+```
+
+### HIL Envelope Limits (Corsair F4U)
+
+| Parameter     | Limit  | Unit   |
+|---------------|--------|--------|
+| Max bank      | 90     | °      |
+| Max pitch     | 30     | °      |
+| Max speed     | 362    | knots  |
+
+---
+
+## LED Status
+
+| Color           | Meaning                                  |
+|-----------------|------------------------------------------|
+| White           | Boot / initializing                      |
+| Blue blinking   | Searching for other nodes on CAN/RS485   |
+| Green           | NORMAL LAW — all 3 nodes healthy         |
+| Yellow          | DEGRADED — one node failed               |
+| Red             | DIRECT LAW — two nodes failed            |
+| Blue solid      | AUTONOMOUS mode active                   |
+| Magenta blink   | DISARM — critical failure                |
+
+---
+
+## SD Card Logging (Node 1 / Master)
+
+Logs to `/hoverlog.csv` every 100ms:
+
+```
+timestamp, heading_1, heading_2, heading_3, voted_heading,
+heading_error, lift_throttle, thrust_throttle, yaw_rate,
+altitude, vspeed, envelope_mode,
+node1_health, node2_health, node3_health
+```
+
+---
+
+## Software Setup
+
+### Requirements
+
+- [PlatformIO](https://platformio.org) CLI or IDE extension
+- Python 3.x
+- USB driver for ESP32 (CP210x or CH340 depending on board revision)
+
+### Dependencies (installed automatically by PlatformIO)
+
+- `adafruit/Adafruit BNO055`
+- `adafruit/Adafruit Unified Sensor`
+- `adafruit/Adafruit PWM Servo Driver Library`
+- `adafruit/Adafruit BMP3XX Library`
+- `fastled/FastLED`
+- `links2004/WebSockets`
+
+### Build Environments
+
+| Environment    | Use                                          |
+|----------------|----------------------------------------------|
+| `node1`        | Node 1 production firmware (master)          |
+| `node2`        | Node 2 production firmware                   |
+| `node3`        | Node 3 production firmware                   |
+| `node1_solo`   | Node 1 standalone — no CAN required          |
+| `node1_hil`    | Node 1 + HIL via OpenSim WebSocket           |
+| `node1_test`   | Node 1 ground test suite (interactive menu)  |
+| `node2_test`   | Node 2 ground test suite                     |
+| `node3_test`   | Node 3 ground test suite                     |
+| `servo_test`   | Minimal PCA9685 sweep test                   |
+| `crsf_dump`    | Raw CRSF frame decoder — receiver diagnostics|
+
+### Flash
+
+```bash
+# Production
+pio run -e node1 -t upload
+pio run -e node2 -t upload
+pio run -e node3 -t upload
+
+# HIL (set WiFi credentials in config.h first)
+pio run -e node1_hil -t upload
+
+# CRSF diagnostics
+pio run -e crsf_dump -t upload
+
+# Monitor
+pio device monitor -b 115200
+```
+
+---
+
+## File Structure
 
 ```
 src/
-├── main.cpp          — Setup, Loop (non-blocking)
-├── config.h          — Alle Konstanten und Pins
-├── can_bus.cpp/h     — CAN Send/Receive, VotePacket
-├── bno055_imu.cpp/h  — IMU Wrapper (Heading, Pitch, Roll)
-├── voting.cpp/h      — Voting-Logik, Envelope-Mode
-├── envelope.cpp/h    — Envelope Protection, PID
-├── rc_input.cpp/h    — PWM RC Eingang (Interrupt)
-├── servo_output.cpp/h — PWM Servo/ESC Ausgang (LEDC)
-├── sd_logger.cpp/h   — SD-Karten CSV-Logging
-├── telemetry.cpp/h   — WiFi WebSocket Telemetrie
-└── led_status.cpp/h  — WS2812 Status-LED
+├── main.cpp            — Setup, main loop (non-blocking, millis-based)
+├── config.h            — All pins, constants, vehicle type, HIL config
+├── can_bus.cpp/h       — CAN send/receive, VotePacket encoding
+├── rs485.cpp/h         — RS485 fallback, time-division multiplexing
+├── comms.cpp/h         — Transport abstraction (CAN primary, RS485 fallback)
+├── bno055_imu.cpp/h    — BNO055 wrapper (heading, pitch, roll, yaw rate, accel)
+├── bmp390.cpp/h        — BMP390 barometer (altitude, vertical speed)
+├── voting.cpp/h        — 3-node voting logic, master election, envelope mode
+├── envelope.cpp/h      — Envelope protection, PID heading hold
+├── rc_input.cpp/h      — CRSF parser, 16 channels, failsafe
+├── servo_output.cpp/h  — PCA9685 PWM driver, vehicle-type-configurable
+├── hil.cpp/h           — HIL WebSocket client (WiFi → hub → OpenSim)
+├── sd_logger.cpp/h     — SD card CSV logging
+├── telemetry.cpp/h     — WiFi WebSocket telemetry output
+├── led_status.cpp/h    — WS2812 status LED
+├── ground_test.cpp     — Interactive ground verification suite
+├── servo_test.cpp      — Minimal PCA9685 sweep test
+└── crsf_dump.cpp       — CRSF frame decoder for receiver diagnostics
 ```
 
 ---
 
 ## Troubleshooting
 
-**BNO055 nicht gefunden:**
-- I2C-Adresse prüfen: Standard = 0x28 (ADR Pin auf GND)
-- Pull-Up-Widerstände vorhanden? (4.7kΩ an SDA + SCL)
-- SDA = GPIO32, SCL = GPIO33 korrekt verbunden?
+**BNO055 not found:**
+- I2C address: 0x28 (ADR pin to GND) or 0x29 (ADR to VCC)
+- Check SDA=GPIO32, SCL=GPIO33, pull-ups present (4.7kΩ to 3.3V)
+- Run ground test suite (`node1_test`) for interactive I2C scan
 
-**Kein CAN-Signal:**
-- CAN-Silent Pin (GPIO23) auf LOW?
-- 120Ω Abschlusswiderstände an beiden Bus-Enden?
-- Alle Nodes mit gleichem GND verbunden?
-- Alle Nodes mit 500 kbps konfiguriert?
+**CAN bus down:**
+- CAN silent pin (GPIO23) must be LOW for active mode
+- 120Ω termination at both ends of the bus
+- All nodes share common GND
+- RS485 fallback activates automatically — check `[COMMS]` serial output
 
-**ESCs reagieren nicht:**
-- ESCs brauchen Kalibrierung? (1000µs Signal für 2s beim Einschalten)
-- GPIO18/19 korrekt verbunden (nicht GPIO32/33)?
-- `servoInit()` aufgerufen?
+**RC shows FAIL:**
+- Check receiver LED: blue = link up, other states vary by firmware
+- Verify CRSF wiring: receiver TX → GPIO25, receiver RX → GPIO5
+- Flash `crsf_dump` to see raw frames and link statistics
+- GPIO34/35 are input-only — cannot be used for CRSF RX reliably on this board
 
-**LED bleibt weiß:**
-- BNO055 oder CAN Init schlägt fehl → `Serial Monitor` öffnen für Debug-Ausgabe
+**Receiver stuck in WiFi mode:**
+- Single clean power cycle (off, wait 5s, on once) to exit WiFi mode
+- Do not triple-cycle — that re-enters WiFi mode on ELRS receivers
+- Access receiver web UI via its IP on the local network to clear WiFi credentials
+
+**Servos not moving:**
+- PCA9685 V+ rail powered? (servos need 5–6V, separate from logic)
+- OE pin on PCA9685 connected to GND?
+- Common GND between power supply and ESP32?
+- Run `servo_test` environment for isolated PCA9685 sweep
+
+**HIL: Corsair not responding to sticks:**
+- Check serial for `ws:OK` — WebSocket must be connected
+- Open OpenSim with `?hil` parameter: `http://localhost:8080?mission=...&hil`
+- Check browser console for `[HIL] rx:` messages confirming controls received
+- Verify hub.js is running and both SIM and HIL clients are in the same room
 
 ---
 
-## Lizenz
+## License
 
-MIT License — frei verwendbar für Timos Hovercraft-Projekt.
+MIT License — see [LICENSE](LICENSE).
