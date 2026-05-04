@@ -12,6 +12,7 @@
 #include <Adafruit_PWMServoDriver.h>
 
 static Adafruit_PWMServoDriver _pca(PCA9685_I2C_ADDR);
+static bool _pcaReady = false;
 
 static uint16_t usToDuty(uint16_t us) {
   us = constrain(us, (uint16_t)SERVO_MIN_US, (uint16_t)SERVO_MAX_US);
@@ -19,19 +20,32 @@ static uint16_t usToDuty(uint16_t us) {
 }
 
 static void setPWMBidirectional(uint8_t ch, float norm) {
+  if (!_pcaReady) return;
   float us = SERVO_MID_US + norm * (SERVO_MAX_US - SERVO_MID_US);
   _pca.setPWM(ch, 0, usToDuty((uint16_t)constrain(us, (float)SERVO_MIN_US, (float)SERVO_MAX_US)));
 }
 
 static void setPWMUnidirectional(uint8_t ch, float norm) {
+  if (!_pcaReady) return;
   float us = SERVO_MIN_US + norm * (SERVO_MAX_US - SERVO_MIN_US);
   _pca.setPWM(ch, 0, usToDuty((uint16_t)constrain(us, (float)SERVO_MIN_US, (float)SERVO_MAX_US)));
 }
 
 void servoInit() {
+  Wire.end();
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+
+  // probe I2C address before init — begin() does not verify presence
+  Wire.beginTransmission(PCA9685_I2C_ADDR);
+  if (Wire.endTransmission() != 0) {
+    Serial.println("[SERVO] WARNING: PCA9685 not found — servo output disabled.");
+    _pcaReady = false;
+    return;
+  }
+
   _pca.begin();
   _pca.setPWMFreq(SERVO_FREQ_HZ);
+  _pcaReady = true;
   servoDisarm();
 #if VEHICLE_TYPE == VEHICLE_AIRPLANE
   Serial.printf("[SERVO] PCA9685 (0x%02X) AIRPLANE: AIL=CH%d ELE=CH%d RUD=CH%d THR=CH%d\n",
@@ -46,6 +60,7 @@ void servoInit() {
 }
 
 void servoDisarm() {
+  if (!_pcaReady) return;
 #if VEHICLE_TYPE == VEHICLE_AIRPLANE
   _pca.setPWM(PCA9685_CH_AILERON,  0, usToDuty(SERVO_MID_US));
   _pca.setPWM(PCA9685_CH_ELEVATOR, 0, usToDuty(SERVO_MID_US));

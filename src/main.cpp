@@ -32,6 +32,7 @@
 #include "telemetry.h"
 #include "led_status.h"
 #include "bmp390.h"
+#include "gps.h"
 #ifdef HIL_MODE
 #include "hil.h"
 #endif
@@ -94,6 +95,9 @@ void setup() {
   if (!bmpInit()) {
     Serial.println("[BOOT] WARNING: BMP390 not available. Altitude data disabled.");
   }
+
+  // 3b. GPS
+  gpsInit();
 
   // 4. CAN + RS485 (comms manages both channels)
   commsInit();
@@ -176,6 +180,7 @@ void loop() {
   imuUpdate();
   bmpUpdate();
 #endif
+  gpsUpdate();
 
   // -----------------------------------------------------------
   // 2. Receive CAN + RS485 (non-blocking, both channels)
@@ -225,7 +230,7 @@ void loop() {
     myPkt.heading_error = headingError(tgtHdg, hdg);
     myPkt.yaw_rate      = imuGetYawRate();
     myPkt.accel_x       = imuGetAccelX();
-    myPkt.health        = !imuIsReady()           ? HEALTH_FAIL :
+    myPkt.health        = !imuIsReady()           ? HEALTH_WARN :
                           imuGetCalibration() < 2  ? HEALTH_WARN :
                                                      HEALTH_OK;
     myPkt.altitude      = bmpIsReady() ? bmpGetAltitude() : 0.0f;
@@ -386,6 +391,10 @@ void loop() {
                   rcIsActive() ? "YES" : "NO",
                   rcGetPWM(1), rcGetPWM(2), rcGetPWM(3), rcGetPWM(4),
                   modeName[rcGetMode()], goodPkts);
+    Serial.printf("[GPS] Fix:%-3s  Sats:%2d  Lat:%.6f  Lon:%.6f  Alt:%.1fm  Spd:%.1fkt  Trk:%.1f°\n",
+                  gpsHasFix() ? "YES" : "NO",
+                  gpsGetSats(), gpsGetLat(), gpsGetLon(),
+                  gpsGetAltMSL(), gpsGetSpeedKt(), gpsGetTrack());
 #endif
   }
 #endif
