@@ -133,7 +133,7 @@ void setup() {
 #ifdef SOLO_NODE
   Serial.println("[BOOT] SOLO_NODE: Skipping node wait — single node test.");
   uint8_t nodeCount = 1;
-  _canConnected = false;
+  _canConnected = true;  // no other nodes expected — show mode colour, not search blink
 #else
   Serial.print("[BOOT] Waiting for all 3 nodes...");
   uint32_t bootStart = millis();
