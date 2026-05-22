@@ -21,6 +21,9 @@ Includes full **Hardware-In-the-Loop (HIL)** integration with the [OpenSim](../O
 │  │ BMP390 Bar │       │ BMP390 Bar │       │ BMP390 Bar │       │
 │  │ CRSF RC    │       │            │       │            │       │
 │  │ PCA9685    │       │            │       │            │       │
+│  │ GPS        │       │            │       │            │       │
+│  │ Airspeed   │       │            │       │            │       │
+│  │ INA226     │       │            │       │            │       │
 │  │ SD Logger  │       │            │       │            │       │
 │  │ Telemetry  │       │            │       │            │       │
 │  └────────────┘       └────────────┘       └────────────┘       │
@@ -75,14 +78,17 @@ ESP32-based board with onboard CAN transceiver and RS485 transceiver. All three 
 |-------------------|------|----------------------------------------|
 | CRSF RC RX        | 25   | Receiver TX → GPIO25 (Serial1)         |
 | CRSF RC TX        | 5    | ESP32 TX → Receiver RX (telemetry)     |
+| GPS RX            | 35   | MAX-M10S TX → GPIO35 (Serial2, input-only) |
+| Airspeed VOUT     | 34   | MPXV7002DP analog out → GPIO34 (ADC1, input-only) |
 
 ### I2C Devices (shared bus, GPIO32/33)
 
 | Device  | Address | Function                     |
 |---------|---------|------------------------------|
 | BNO055  | 0x28    | IMU — heading, pitch, roll, yaw rate, accel |
-| BMP390  | 0x76    | Barometer — altitude, vertical speed |
+| BMP390  | 0x77    | Barometer — altitude, vertical speed (SDO to VCC) |
 | PCA9685 | 0x40    | PWM servo/ESC driver (16 channels, 50Hz) |
+| INA226  | 0x41    | Power monitor — voltage, current, power (Node 1 only) |
 
 ---
 
@@ -127,6 +133,63 @@ A0–A5   ──►    GND   (address 0x40)
 ```
 
 All servo/ESC signal wires connect to PCA9685 channels. The PCA9685 V+ rail must have its own power supply — do not power servos from the ESP32 3.3V pin.
+
+### MPXV7002DP Airspeed Sensor (Node 1 only)
+
+The sensor has 8 pins in two rows of 4. Only 3 are electrical — the rest are NC (no-connect, mechanical support only). Pin 1 is marked with a dot or bevelled corner on the package body.
+
+```
+MPXV7002DP      LilyGo T-CAN485
+────────────────────────────────
+Pin 1  VS   ──►    3.3V
+Pin 2  GND  ──►    GND
+Pin 3  VOUT ──►    GPIO34
+Pins 4–8    ──►    leave unconnected
+```
+
+The two nozzles on top of the package are pneumatic ports, not electrical pins:
+
+| Port | Connect to           | Notes                                         |
+|------|----------------------|-----------------------------------------------|
+| P1   | Pitot tube           | Faces forward into airflow (total pressure)   |
+| P2   | Static port or open  | Leave open inside fuselage for simple installs|
+
+**Pitot tube placement:** mount the probe on the wing leading edge (outside propwash) or on the nose of a pusher aircraft, pointing directly into the relative wind. Use 3mm ID silicone tubing to connect the probe to the P1 nozzle.
+
+**Zero calibration:** runs automatically at every boot. The aircraft must be sitting still in calm air when powered on — any airflow over the pitot tube during boot will bias the zero and cause incorrect airspeed readings.
+
+**Stall warning threshold:** set `AIRSPEED_STALL_KT` in `config.h` to match your airframe's stall speed. The `airspeedIsStall()` function returns true below this value.
+
+### GPS — MAX-M10S (Node 1 only)
+
+```
+MAX-M10S        LilyGo T-CAN485
+────────────────────────────────
+TX      ──►    GPIO35  (Serial2 RX, input-only)
+GND     ──►    GND
+VCC     ──►    3.3V
+```
+
+GPIO35 is input-only — it cannot be used as TX. Connect only the GPS module's TX to it. The firmware parses NMEA sentences `$GNGGA` (fix, position, altitude) and `$GNRMC` (speed, track) at 9600 baud with no external library.
+
+### INA226 Power Monitor (Node 1 only)
+
+Monitors the avionics power rail. Uses the shared I2C bus (GPIO32/33).
+
+```
+INA226          LilyGo T-CAN485
+────────────────────────────────
+SDA     ──►    GPIO32
+SCL     ──►    GPIO33
+VCC     ──►    3.3V
+GND     ──►    GND
+A0      ──►    VCC   (sets I2C address to 0x41)
+A1      ──►    GND
+IN+     ──►    Avionics supply positive (after fuse)
+IN-     ──►    Load positive
+```
+
+Configured for a 0.01 Ω shunt resistor, 1 mA current LSB. Reads voltage, current, and power every 100ms. Voltage/current/power are printed to serial in `node1_solo` mode and included in the WebSocket telemetry JSON.
 
 ---
 
@@ -325,8 +388,8 @@ Logs to `/hoverlog.csv` every 100ms:
 ```
 timestamp, heading_1, heading_2, heading_3, voted_heading,
 heading_error, lift_throttle, thrust_throttle, yaw_rate,
-altitude, vspeed, envelope_mode,
-node1_health, node2_health, node3_health
+altitude_m, vspeed_ms, ias_kt,
+envelope_mode, node1_health, node2_health, node3_health
 ```
 
 ---
@@ -394,6 +457,9 @@ src/
 ├── comms.cpp/h         — Transport abstraction (CAN primary, RS485 fallback)
 ├── bno055_imu.cpp/h    — BNO055 wrapper (heading, pitch, roll, yaw rate, accel)
 ├── bmp390.cpp/h        — BMP390 barometer (altitude, vertical speed)
+├── gps.cpp/h           — GNSS MAX-M10S NMEA parser (position, speed, track)
+├── airspeed.cpp/h      — MPXV7002DP differential pressure → IAS
+├── ina226.cpp/h        — INA226 power monitor (voltage, current, power)
 ├── voting.cpp/h        — 3-node voting logic, master election, envelope mode
 ├── envelope.cpp/h      — Envelope protection, PID heading hold
 ├── rc_input.cpp/h      — CRSF parser, 16 channels, failsafe
