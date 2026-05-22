@@ -16,6 +16,7 @@ struct LogData {
   float yaw_rate;
   float altitude;   // meters AGL
   float vspeed;     // m/s vertical speed
+  float ias_kt;     // indicated airspeed, knots (MPXV7002DP)
   uint8_t envelope_mode;
   uint8_t node1_health, node2_health, node3_health;
 };

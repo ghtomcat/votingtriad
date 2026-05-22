@@ -108,6 +108,7 @@ void telemetrySend(const TelemetryData& d) {
     "\"yaw_rate\":%.2f,"
     "\"altitude\":%.2f,"
     "\"vspeed\":%.3f,"
+    "\"ias_kt\":%.1f,"
     "\"envelope_mode\":\"%s\","
     "\"nodes\":["
     "{\"id\":1,\"health\":\"%s\",\"heading\":%.1f},"
@@ -116,7 +117,7 @@ void telemetrySend(const TelemetryData& d) {
     "]}",
     d.heading, d.pitch, d.roll,
     d.heading_error, d.lift_throttle, d.thrust_throttle, d.yaw_rate,
-    d.altitude, d.vspeed,
+    d.altitude, d.vspeed, d.ias_kt,
     modeStr,
     healthStr(d.node_health[1]), d.node_heading[1],
     healthStr(d.node_health[2]), d.node_heading[2],

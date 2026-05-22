@@ -17,7 +17,7 @@ static const uint32_t FLUSH_INTERVAL_MS = 5000;
 static const char* CSV_HEADER =
   "timestamp,heading_1,heading_2,heading_3,voted_heading,"
   "heading_error,lift_throttle,thrust_throttle,yaw_rate,"
-  "altitude_m,vspeed_ms,"
+  "altitude_m,vspeed_ms,ias_kt,"
   "envelope_mode,node1_health,node2_health,node3_health\n";
 
 bool sdInit() {
@@ -70,12 +70,12 @@ void sdLog(const LogData& d) {
     }
   };
 
-  _logFile.printf("%lu,%.1f,%.1f,%.1f,%.1f,%.2f,%.3f,%.3f,%.2f,%.2f,%.3f,%s,%s,%s,%s\n",
+  _logFile.printf("%lu,%.1f,%.1f,%.1f,%.1f,%.2f,%.3f,%.3f,%.2f,%.2f,%.3f,%.1f,%s,%s,%s,%s\n",
     d.timestamp,
     d.heading_1, d.heading_2, d.heading_3,
     d.voted_heading, d.heading_error,
     d.lift_throttle, d.thrust_throttle, d.yaw_rate,
-    d.altitude, d.vspeed,
+    d.altitude, d.vspeed, d.ias_kt,
     modeStr,
     healthStr(d.node1_health),
     healthStr(d.node2_health),

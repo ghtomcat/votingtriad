@@ -33,6 +33,8 @@
 #include "led_status.h"
 #include "bmp390.h"
 #include "gps.h"
+#include "ina226.h"
+#include "airspeed.h"
 #ifdef HIL_MODE
 #include "hil.h"
 #endif
@@ -99,8 +101,16 @@ void setup() {
   // 3b. GPS
   gpsInit();
 
-  // 4. CAN + RS485 (comms manages both channels)
+  // 3c. INA226 power monitor
+  inaInit();
+
+  // 3d. MPXV7002DP airspeed (sensor must be unpressurised during boot)
+  airspeedInit();
+
+  // 4. CAN + RS485 (comms manages both channels — skipped in solo)
+#ifndef SOLO_NODE
   commsInit();
+#endif
 
   // 4. Voting
   votingInit(NODE_ID);
@@ -181,12 +191,14 @@ void loop() {
   bmpUpdate();
 #endif
   gpsUpdate();
+  inaUpdate();
+  airspeedUpdate();
 
   // -----------------------------------------------------------
   // 2. Receive CAN + RS485 (non-blocking, both channels)
   // -----------------------------------------------------------
+#ifndef SOLO_NODE
   commsReceive();
-  rcUpdate();
 
   // check connectivity: at least one other node active on any channel?
   for (uint8_t id = 1; id <= 3; id++) {
@@ -196,6 +208,8 @@ void loop() {
       break;
     }
   }
+#endif
+  rcUpdate();
 
   // -----------------------------------------------------------
   // 3. Build and send VotePacket (every 20ms)
@@ -238,7 +252,9 @@ void loop() {
 #endif
     myPkt.timestamp     = now;
 
+#ifndef SOLO_NODE
     commsSend(myPkt);
+#endif
 
     // -----------------------------------------------------------
     // 4. Voting update (after own packet is sent)
@@ -332,6 +348,7 @@ void loop() {
       logEntry.yaw_rate        = imuGetYawRate();
       logEntry.altitude        = bmpGetAltitude();
       logEntry.vspeed          = bmpGetVSpeed();
+      logEntry.ias_kt          = airspeedGetIAS_kt();
       logEntry.envelope_mode   = (uint8_t)votingGetMode();
       logEntry.node1_health    = (uint8_t)ns1.health;
       logEntry.node2_health    = (uint8_t)ns2.health;
@@ -356,6 +373,7 @@ void loop() {
       tel.yaw_rate        = imuGetYawRate();
       tel.altitude        = bmpGetAltitude();
       tel.vspeed          = bmpGetVSpeed();
+      tel.ias_kt          = airspeedGetIAS_kt();
       tel.envelope_mode   = votingGetMode();
 
       for (uint8_t id = 1; id <= 3; id++) {
@@ -395,6 +413,11 @@ void loop() {
                   gpsHasFix() ? "YES" : "NO",
                   gpsGetSats(), gpsGetLat(), gpsGetLon(),
                   gpsGetAltMSL(), gpsGetSpeedKt(), gpsGetTrack());
+    Serial.printf("[PWR] %.2fV  %.3fA  %.2fW\n",
+                  inaGetVoltage(), inaGetCurrent(), inaGetPower());
+    Serial.printf("[IAS] %.1f kt  %.1f Pa%s\n",
+                  airspeedGetIAS_kt(), airspeedGetPa(),
+                  airspeedIsStall() ? "  *** STALL ***" : "");
 #endif
   }
 #endif

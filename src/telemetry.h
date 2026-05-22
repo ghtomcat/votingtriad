@@ -18,6 +18,7 @@ struct TelemetryData {
   float yaw_rate;
   float altitude;    // meters AGL
   float vspeed;      // m/s vertical speed
+  float ias_kt;      // indicated airspeed, knots (MPXV7002DP)
   EnvelopeMode envelope_mode;
   float   node_heading[4];  // index 1-3
   uint8_t node_health[4];   // index 1-3

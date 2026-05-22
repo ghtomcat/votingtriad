@@ -97,7 +97,7 @@
 // ===========================================================
 // BMP390 BAROMETER
 // ===========================================================
-#define BMP390_I2C_ADDR       0x76  // SDO to GND; use 0x77 if SDO to VCC
+#define BMP390_I2C_ADDR       0x77  // SDO to VCC; use 0x76 if SDO to GND
 #define BMP390_SAMPLERATE     20    // ms between samples (50Hz)
 #define BMP390_SEA_LEVEL_HPA  1013.25f  // standard atmosphere; adjust for local QNH
 
@@ -193,6 +193,41 @@
 #define HIL_MAX_BANK_DEG   90.0f
 #define HIL_MAX_PITCH_DEG  30.0f
 #define HIL_MAX_SPD_KT    362.0f
+
+// ===========================================================
+// AIRSPEED — MPXV7002DP differential pressure sensor
+// ADC1_CH7 / GPIO35 (input-only pin on LilyGo T-CAN485)
+// Pitot: P1 = total pressure, P2 = static port
+// ===========================================================
+
+// ADC pin — input-only, safe with WiFi (ADC1)
+#define PIN_AIRSPEED_ADC      34
+
+// Sensor supply voltage (V). If powering from 3.3 V rail, use 3.3f.
+// If powering from 5 V with a voltage divider on the output, use 5.0f
+// and ensure the divided output never exceeds 3.3 V on the ESP32 pin.
+#define AIRSPEED_SENSOR_VCC   3.3f
+
+// ESP32 ADC full-scale for ADC_11db attenuation (mV).
+// Nominal 3900 mV; tune slightly if zero offset drifts after calibration.
+#define AIRSPEED_ADC_VMAX_MV  3900
+
+// Zero calibration: samples averaged at boot (sensor must be unpressurised)
+#define AIRSPEED_ZERO_SAMPLES 64
+
+// Update rate
+#define AIRSPEED_SAMPLERATE_MS  20    // ms between updates (50 Hz)
+
+// Noise floor — differential pressures below this are treated as zero
+// ~2 Pa ≈ 2.6 kt; keeps the IAS at 0 when stationary
+#define AIRSPEED_NOISE_FLOOR_PA 2.0f
+
+// Air density at sea level, ISA (kg/m³)
+// For altitude-corrected TAS, update with baro + temperature data
+#define RHO_SEA_LEVEL_KGM3    1.225f
+
+// Stall warning threshold (knots)
+#define AIRSPEED_STALL_KT     35.0f
 
 // ===========================================================
 // SYSTEM

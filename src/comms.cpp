@@ -43,9 +43,7 @@ void commsInit() {
 }
 
 void commsSend(const VotePacket& pkt) {
-  // always send on CAN
   canSendPacket(pkt);
-  // always send on RS485 in parallel (redundant, own slot)
   rs485Send(pkt);
 }
 
